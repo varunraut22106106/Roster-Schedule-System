@@ -6,6 +6,7 @@ from sqlalchemy import engine_from_config, pool
 from dotenv import load_dotenv
 
 from app.database.base import Base
+import app.models
 
 # Load environment variables
 ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
