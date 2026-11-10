@@ -17,3 +17,7 @@ def health_check():
     return {
         "status": "healthy"
     }
+    
+from app.routes.auth import router as auth_router
+
+app.include_router(auth_router)
