@@ -13,6 +13,11 @@ from app.schemas.organization_schema import (
     BrandResponse
 )
 from app.services import organization_service as organization_service
+from app.schemas.organization_schema import (
+    PodCreate,
+    PodUpdate,
+    PodResponse
+)
 
 
 router = APIRouter(
@@ -112,3 +117,107 @@ def delete_brand(brand_id: UUID, db: Session = Depends(get_db)):
         )
 
     return organization_service.delete_brand(db, brand)
+
+@router.post(
+    "/pods",
+    response_model=PodResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_operations_manager)]
+)
+def create_pod(
+    pod_data: PodCreate,
+    db: Session = Depends(get_db)
+):
+    try:
+        return organization_service.create_pod(db, pod_data)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Pod name already exists"
+        )
+
+
+@router.get(
+    "/pods",
+    response_model=list[PodResponse],
+    dependencies=[Depends(require_operations_manager)]
+)
+def get_all_pods(db: Session = Depends(get_db)):
+    return organization_service.get_all_pods(db)
+
+
+@router.get(
+    "/pods/{pod_id}",
+    response_model=PodResponse,
+    dependencies=[Depends(require_operations_manager)]
+)
+def get_pod(pod_id: UUID, db: Session = Depends(get_db)):
+    pod = organization_service.get_pod_by_id(db, pod_id)
+
+    if not pod:
+        raise HTTPException(
+            status_code=404,
+            detail="Pod not found"
+        )
+
+    return pod
+
+from app.services.organization_service import validate_pod_lead
+@router.patch(
+    "/pods/{pod_id}",
+    response_model=PodResponse,
+    dependencies=[Depends(require_operations_manager)]
+)
+def update_pod(
+    pod_id: UUID,
+    pod_data: PodUpdate,
+    db: Session = Depends(get_db)
+):
+    pod = organization_service.get_pod_by_id(db, pod_id)
+
+    if not pod:
+        raise HTTPException(
+            status_code=404,
+            detail="Pod not found"
+        )
+
+    update_data = pod_data.model_dump(exclude_unset=True)
+
+    if "pod_lead_id" in update_data and update_data["pod_lead_id"]:
+        employee = validate_pod_lead(
+            db, update_data["pod_lead_id"]
+        )
+
+        if employee.pod_id != pod.pod_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Pod Lead must belong to the same pod"
+            )
+
+    for key, value in update_data.items():
+        setattr(pod, key, value)
+
+    db.commit()
+    db.refresh(pod)
+
+    return pod
+
+
+@router.delete(
+    "/pods/{pod_id}",
+    response_model=PodResponse,
+    dependencies=[Depends(require_operations_manager)]
+)
+def delete_pod(pod_id: UUID, db: Session = Depends(get_db)):
+    pod = organization_service.get_pod_by_id(db, pod_id)
+
+    if not pod:
+        raise HTTPException(
+            status_code=404,
+            detail="Pod not found"
+        )
+
+    return organization_service.delete_pod(db, pod)
