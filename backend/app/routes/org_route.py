@@ -13,6 +13,11 @@ from app.schemas.organization_schema import (
     BrandResponse
 )
 from app.services import organization_service as organization_service
+from app.schemas.organization_schema import (
+    PodCreate,
+    PodUpdate,
+    PodResponse
+)
 
 
 router = APIRouter(
