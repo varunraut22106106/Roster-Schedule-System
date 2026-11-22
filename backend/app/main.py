@@ -20,7 +20,8 @@ def health_check():
     
 from app.routes.auth import router as auth_router
 from app.routes.org_route import router as organization_router
-
+from app.routes.employee_route import router as employee_router
 
 app.include_router(auth_router)
 app.include_router(organization_router)
+app.include_router(employee_router)
