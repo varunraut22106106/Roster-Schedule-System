@@ -112,3 +112,123 @@ def delete_brand(brand_id: UUID, db: Session = Depends(get_db)):
         )
 
     return organization_service.delete_brand(db, brand)
+
+from app.schemas.organization_schema import (
+    ProcessCreate,
+    ProcessUpdate,
+    ProcessResponse
+)
+
+
+@router.post(
+    "/processes",
+    response_model=ProcessResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_operations_manager)]
+)
+def create_process(
+    process_data: ProcessCreate,
+    db: Session = Depends(get_db)
+):
+    try:
+        return organization_service.create_process(db, process_data)
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Process already exists for this brand"
+        )
+
+
+@router.get(
+    "/processes",
+    response_model=list[ProcessResponse],
+    dependencies=[Depends(require_operations_manager)]
+)
+def get_all_processes(db: Session = Depends(get_db)):
+    return organization_service.get_all_processes(db)
+
+
+@router.get(
+    "/processes/{process_id}",
+    response_model=ProcessResponse,
+    dependencies=[Depends(require_operations_manager)]
+)
+def get_process(
+    process_id: UUID,
+    db: Session = Depends(get_db)
+):
+    process = organization_service.get_process_by_id(
+        db, process_id
+    )
+
+    if not process:
+        raise HTTPException(
+            status_code=404,
+            detail="Process not found"
+        )
+
+    return process
+
+
+@router.patch(
+    "/processes/{process_id}",
+    response_model=ProcessResponse,
+    dependencies=[Depends(require_operations_manager)]
+)
+def update_process(
+    process_id: UUID,
+    process_data: ProcessUpdate,
+    db: Session = Depends(get_db)
+):
+    process = organization_service.get_process_by_id(
+        db, process_id
+    )
+
+    if not process:
+        raise HTTPException(
+            status_code=404,
+            detail="Process not found"
+        )
+
+    try:
+        return organization_service.update_process(
+            db, process, process_data
+        )
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Process name already exists for this brand"
+        )
+
+
+@router.delete(
+    "/processes/{process_id}",
+    response_model=ProcessResponse,
+    dependencies=[Depends(require_operations_manager)]
+)
+def delete_process(
+    process_id: UUID,
+    db: Session = Depends(get_db)
+):
+    process = organization_service.get_process_by_id(
+        db, process_id
+    )
+
+    if not process:
+        raise HTTPException(
+            status_code=404,
+            detail="Process not found"
+        )
+
+    return organization_service.delete_process(db, process)
+
