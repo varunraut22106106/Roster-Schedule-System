@@ -46,8 +46,8 @@ class PublicHolidayResponse(BaseModel):
 # ---------------- LEAVE ----------------
 
 class LeaveCreate(BaseModel):
-    employee_id: UUID
-    requested_by: UUID
+    employee_id: UUID | None = None
+    requested_by: UUID | None = None
     start_date: date
     end_date: date
     reason: str | None = None
@@ -78,12 +78,12 @@ class LeaveResponse(BaseModel):
 # ---------------- COMP-OFF TRANSACTION ----------------
 
 class CompOffCreate(BaseModel):
-    employee_id: UUID
+    employee_id: UUID | None = None
     action: CompOffAction
     balance_change: int
     requested_date: date | None = None
     reason: str | None = None
-    created_by: UUID
+    created_by: UUID | None = None
 
 
 class CompOffReview(BaseModel):

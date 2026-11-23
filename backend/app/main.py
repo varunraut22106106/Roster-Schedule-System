@@ -23,7 +23,7 @@ from app.routes.org_route import router as organization_router
 from app.routes.employee_route import router as employee_router
 from app.routes.policy_route import router as policies_router
 from app.routes.availability_route import router as availability_router
-
+from app.routes.leave_compoff_route import router as leave_compoff_router
 
 
 app.include_router(auth_router)
@@ -31,3 +31,4 @@ app.include_router(organization_router)
 app.include_router(employee_router)
 app.include_router(policies_router)
 app.include_router(availability_router)
+app.include_router(leave_compoff_router)
