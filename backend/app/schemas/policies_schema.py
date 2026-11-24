@@ -69,6 +69,8 @@ class StaffingRequirementCreate(BaseModel):
     effective_date: date | None = None
     minimum_employees: int = Field(default=1, ge=0)
     is_active: bool = True
+    start_time: time | None = None
+    end_time: time | None = None
 
 
 class StaffingRequirementUpdate(BaseModel):
@@ -79,6 +81,8 @@ class StaffingRequirementUpdate(BaseModel):
     effective_date: date | None = None
     minimum_employees: int | None = Field(default=None, ge=0)
     is_active: bool | None = None
+    start_time: time | None = None
+    end_time: time | None = None
 
 
 class StaffingRequirementResponse(BaseModel):
@@ -91,6 +95,8 @@ class StaffingRequirementResponse(BaseModel):
     minimum_employees: int
     is_active: bool
     created_at: datetime
+    start_time: time | None = None
+    end_time: time | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
