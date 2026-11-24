@@ -1,8 +1,8 @@
 
 from uuid import UUID
-from datetime import date, datetime
+from datetime import date, datetime , time
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field,model_validator
 
 from app.models.enums import (
     DayStatus,
@@ -12,6 +12,8 @@ from app.models.enums import (
     ConflictStatus,
     ConflictType,
     EditAction,
+    AllocationMode,
+    StaffingRuleScope
 )
 
 
@@ -209,5 +211,149 @@ class RosterEditHistoryResponse(BaseModel):
     before_data: dict | None
     after_data: dict | None
     edited_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+    
+
+# ---------------- ROSTER ALLOCATION RULE ----------------
+
+class RosterAllocationRuleCreate(BaseModel):
+    roster_id: UUID
+    employee_id: UUID
+    roster_date: date
+    process_id: UUID
+
+    allocation_mode: AllocationMode
+
+    fixed_minutes: int | None = Field(default=None, gt=0)
+    minimum_minutes: int | None = Field(default=None, gt=0)
+    maximum_minutes: int | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def validate_allocation_mode(self):
+        if self.allocation_mode == AllocationMode.FIXED:
+            if self.fixed_minutes is None:
+                raise ValueError(
+                    "fixed_minutes is required for fixed allocation"
+                )
+
+            if self.minimum_minutes is not None or self.maximum_minutes is not None:
+                raise ValueError(
+                    "Flexible allocation fields must be null for fixed allocation"
+                )
+
+        elif self.allocation_mode == AllocationMode.FLEXIBLE:
+            if self.fixed_minutes is not None:
+                raise ValueError(
+                    "fixed_minutes must be null for flexible allocation"
+                )
+
+            if self.minimum_minutes is None or self.maximum_minutes is None:
+                raise ValueError(
+                    "Both minimum_minutes and maximum_minutes are required"
+                )
+
+            if self.minimum_minutes > self.maximum_minutes:
+                raise ValueError(
+                    "minimum_minutes cannot exceed maximum_minutes"
+                )
+
+        return self
+
+
+class RosterAllocationRuleUpdate(BaseModel):
+    allocation_mode: AllocationMode | None = None
+    fixed_minutes: int | None = Field(default=None, gt=0)
+    minimum_minutes: int | None = Field(default=None, gt=0)
+    maximum_minutes: int | None = Field(default=None, gt=0)
+
+
+class RosterAllocationRuleResponse(BaseModel):
+    allocation_rule_id: UUID
+    roster_id: UUID
+    employee_id: UUID
+    roster_date: date
+    process_id: UUID
+    allocation_mode: AllocationMode
+    fixed_minutes: int | None
+    minimum_minutes: int | None
+    maximum_minutes: int | None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ---------------- TIME-SLOT STAFFING REQUIREMENT ----------------
+
+class StaffingTimeSlotCreate(BaseModel):
+    process_id: UUID
+    shift_id: UUID | None = None
+
+    scope: StaffingRuleScope
+    weekday: int | None = Field(default=None, ge=0, le=6)
+    effective_date: date | None = None
+
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+
+    minimum_employees: int = Field(ge=0)
+    is_active: bool = True
+
+    @model_validator(mode="after")
+    def validate_time_slot(self):
+        if (self.start_time is None) != (self.end_time is None):
+            raise ValueError(
+                "Both start_time and end_time must be supplied together"
+            )
+
+        if self.start_time is not None and self.end_time <= self.start_time:
+            raise ValueError("end_time must be later than start_time")
+
+        if self.scope == StaffingRuleScope.DEFAULT:
+            if self.weekday is not None or self.effective_date is not None:
+                raise ValueError(
+                    "DEFAULT scope cannot have weekday or effective_date"
+                )
+
+        elif self.scope == StaffingRuleScope.WEEKDAY:
+            if self.weekday is None or self.effective_date is not None:
+                raise ValueError(
+                    "WEEKDAY scope requires weekday only"
+                )
+
+        elif self.scope == StaffingRuleScope.DATE:
+            if self.effective_date is None or self.weekday is not None:
+                raise ValueError(
+                    "DATE scope requires effective_date only"
+                )
+
+        return self
+
+
+class StaffingTimeSlotUpdate(BaseModel):
+    shift_id: UUID | None = None
+    scope: StaffingRuleScope | None = None
+    weekday: int | None = Field(default=None, ge=0, le=6)
+    effective_date: date | None = None
+
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+
+    minimum_employees: int | None = Field(default=None, ge=0)
+    is_active: bool | None = None
+
+
+class StaffingTimeSlotResponse(BaseModel):
+    requirement_id: UUID
+    process_id: UUID
+    shift_id: UUID | None
+    scope: StaffingRuleScope
+    weekday: int | None
+    effective_date: date | None
+    start_time: datetime | None
+    end_time: datetime | None
+    minimum_employees: int
+    is_active: bool
+    created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
