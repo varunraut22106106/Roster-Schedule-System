@@ -3,7 +3,7 @@ from uuid import UUID
 from datetime import date
 
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy import or_ , and_
 
 from app.models.policies import (
     Shift,
@@ -80,13 +80,26 @@ def validate_staffing_scope(scope, weekday, effective_date):
             raise ValueError("DATE scope must not contain weekday")
 
 
-def check_staffing_requirement_duplicate(
+
+def validate_staffing_time_slot(start_time, end_time):
+    if (start_time is None) != (end_time is None):
+        raise ValueError(
+            "Both start_time and end_time must be provided together"
+        )
+
+    if start_time is not None and end_time <= start_time:
+        raise ValueError("Staffing slot end_time must be after start_time")
+
+
+def check_staffing_requirement_conflict(
     db: Session,
     process_id,
     shift_id,
     scope,
     weekday,
     effective_date,
+    start_time,
+    end_time,
     exclude_id=None
 ):
     query = db.query(StaffingRequirement).filter(
@@ -103,11 +116,31 @@ def check_staffing_requirement_duplicate(
             StaffingRequirement.requirement_id != exclude_id
         )
 
-    if query.first():
+    # A full-shift requirement cannot coexist with another
+    # requirement for the same process, shift and scope.
+    if start_time is None:
+        conflict = query.first()
+    else:
+        query = query.filter(
+            or_(
+                and_(
+                    StaffingRequirement.start_time.is_(None),
+                    StaffingRequirement.end_time.is_(None)
+                ),
+                and_(
+                    StaffingRequirement.start_time < end_time,
+                    StaffingRequirement.end_time > start_time
+                )
+            )
+        )
+        conflict = query.first()
+
+    if conflict:
         raise ValueError(
             "An active staffing requirement already exists "
-            "for this process, shift and scope"
+            "for an overlapping time slot in this process and scope"
         )
+
 
 
 def check_policy_overlap(
@@ -275,6 +308,7 @@ def delete_process_operating_day(
 
 # ---------------- STAFFING REQUIREMENT SERVICES ----------------
 
+
 def create_staffing_requirement(db: Session, data):
     validate_process(db, data.process_id)
     validate_shift(db, data.shift_id)
@@ -285,21 +319,31 @@ def create_staffing_requirement(db: Session, data):
         data.effective_date
     )
 
+    validate_staffing_time_slot(
+        data.start_time,
+        data.end_time
+    )
+
     if data.is_active:
-        check_staffing_requirement_duplicate(
+        check_staffing_requirement_conflict(
             db,
             data.process_id,
             data.shift_id,
             data.scope,
             data.weekday,
-            data.effective_date
+            data.effective_date,
+            data.start_time,
+            data.end_time
         )
 
     requirement = StaffingRequirement(**data.model_dump())
+
     db.add(requirement)
     db.commit()
     db.refresh(requirement)
+
     return requirement
+
 
 
 def get_all_staffing_requirements(
@@ -327,6 +371,7 @@ def get_staffing_requirement_by_id(
     ).first()
 
 
+
 def update_staffing_requirement(
     db: Session,
     requirement: StaffingRequirement,
@@ -345,21 +390,32 @@ def update_staffing_requirement(
     effective_date = update_data.get(
         "effective_date", requirement.effective_date
     )
-    is_active = update_data.get("is_active", requirement.is_active)
+    start_time = update_data.get(
+        "start_time", requirement.start_time
+    )
+    end_time = update_data.get(
+        "end_time", requirement.end_time
+    )
+    is_active = update_data.get(
+        "is_active", requirement.is_active
+    )
 
     validate_process(db, process_id)
     validate_shift(db, shift_id)
 
     validate_staffing_scope(scope, weekday, effective_date)
+    validate_staffing_time_slot(start_time, end_time)
 
     if is_active:
-        check_staffing_requirement_duplicate(
+        check_staffing_requirement_conflict(
             db,
             process_id,
             shift_id,
             scope,
             weekday,
             effective_date,
+            start_time,
+            end_time,
             exclude_id=requirement.requirement_id
         )
 
@@ -368,7 +424,9 @@ def update_staffing_requirement(
 
     db.commit()
     db.refresh(requirement)
+
     return requirement
+
 
 
 def deactivate_staffing_requirement(
