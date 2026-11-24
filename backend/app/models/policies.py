@@ -99,6 +99,15 @@ class StaffingRequirement(Base):
 
     process = relationship("Process")
     shift = relationship("Shift")
+    
+    # Optional time-slot coverage
+    start_time: Mapped[Time | None] = mapped_column(
+        Time, nullable=True
+    )
+
+    end_time: Mapped[Time | None] = mapped_column(
+        Time, nullable=True
+    )
 
 
 class WeeklyOffPolicy(Base):
@@ -180,4 +189,13 @@ class WorkloadPolicy(Base):
         CheckConstraint("max_hours_per_week > 0"),
         CheckConstraint("max_consecutive_work_days > 0"),
         CheckConstraint("minimum_rest_hours >= 0"),
+        CheckConstraint(
+            "(start_time IS NULL AND end_time IS NULL) OR "
+            "(start_time IS NOT NULL AND end_time IS NOT NULL)",
+            name="ck_staffing_time_slot_pair"
+        ),
+        CheckConstraint(
+            "start_time IS NULL OR end_time > start_time",
+            name="ck_staffing_time_slot_order"
+        ),
     )

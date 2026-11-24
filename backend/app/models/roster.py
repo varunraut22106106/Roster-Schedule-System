@@ -12,9 +12,14 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base
 from app.models.enums import (
-    DayStatus, GenerationStatus, RosterStatus,
-    ConflictStatus, ConflictType, EditAction,
-    RosterPeriodStatus
+    DayStatus,
+    GenerationStatus,
+    RosterStatus,
+    ConflictStatus,
+    ConflictType,
+    EditAction,
+    RosterPeriodStatus,
+    AllocationMode,
 )
 
 
@@ -358,3 +363,90 @@ class RosterEditHistory(Base):
 
     generation = relationship("RosterGeneration")
     editor = relationship("Employee")
+
+
+class RosterAllocationRule(Base):
+    __tablename__ = "roster_allocation_rules"
+
+    allocation_rule_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, primary_key=True, default=uuid.uuid4
+    )
+
+    roster_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("rosters.roster_id", ondelete="CASCADE"),
+        nullable=False
+    )
+
+    employee_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("employees.employee_id"),
+        nullable=False
+    )
+
+    roster_date: Mapped[date] = mapped_column(
+        Date, nullable=False
+    )
+
+    process_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("processes.process_id"),
+        nullable=False
+    )
+
+    allocation_mode: Mapped[AllocationMode] = mapped_column(
+        nullable=False
+    )
+
+    fixed_minutes: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+
+    minimum_minutes: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+
+    maximum_minutes: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now()
+    )
+
+    roster = relationship("Roster")
+    employee = relationship("Employee")
+    process = relationship("Process")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "roster_id",
+            "employee_id",
+            "roster_date",
+            "process_id",
+            name="uq_roster_employee_date_process_rule"
+        ),
+        CheckConstraint(
+            "fixed_minutes IS NULL OR fixed_minutes > 0",
+            name="ck_allocation_fixed_positive"
+        ),
+        CheckConstraint(
+            "minimum_minutes IS NULL OR minimum_minutes > 0",
+            name="ck_allocation_minimum_positive"
+        ),
+        CheckConstraint(
+            "maximum_minutes IS NULL OR maximum_minutes > 0",
+            name="ck_allocation_maximum_positive"
+        ),
+        CheckConstraint(
+            "minimum_minutes IS NULL OR maximum_minutes IS NULL "
+            "OR minimum_minutes <= maximum_minutes",
+            name="ck_allocation_min_max"
+        ),
+        Index(
+            "ix_roster_allocation_employee_date",
+            "employee_id",
+            "roster_date"
+        ),
+    )

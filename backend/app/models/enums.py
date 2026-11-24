@@ -117,3 +117,7 @@ class UserRole(str, Enum):
     OPERATIONS_MANAGER = "operations_manager"
     POD_LEAD = "pod_lead"
     EMPLOYEE = "employee"
+    
+class AllocationMode(str, Enum):
+    FIXED = "fixed"
+    FLEXIBLE = "flexible"
