@@ -372,3 +372,22 @@ class RosterGenerationResult(BaseModel):
     assignments_created: int
     unmet_coverage_count: int
     solver_time_seconds: float
+
+class RosterGenerationDetailResponse(RosterGenerationResponse):
+    total_assignments: int
+    total_conflicts: int
+
+
+class RosterAssignmentDetailResponse(RosterAssignmentResponse):
+    employee_name: str
+    process_name: str
+    shift_name: str
+
+class PublishRosterRequest(BaseModel):
+    generation_id: UUID
+    accept_unresolved_conflicts: bool = False
+
+
+class ConflictResolutionRequest(BaseModel):
+    status: ConflictStatus
+    notes: str | None = None

@@ -540,3 +540,193 @@ def generate_roster_preview(
 
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+    
+    
+from datetime import timezone
+from app.models.enums import ConflictStatus
+
+
+def persist_roster_generation(
+    db: Session,
+    roster: Roster,
+    result,
+    time_limit_seconds: int = 30,
+):
+    if roster.status != RosterStatus.DRAFT:
+        raise HTTPException(
+            status_code=400,
+            detail="Only draft rosters can be generated",
+        )
+
+    if roster.period_status != RosterPeriodStatus.ACTIVE:
+        raise HTTPException(
+            status_code=400,
+            detail="Archived roster periods cannot be generated",
+        )
+
+    if result.status not in ("OPTIMAL", "FEASIBLE"):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Cannot persist roster. Solver status: {result.status}",
+        )
+
+    try:
+        latest_generation = (
+            db.query(func.max(RosterGeneration.generation_number))
+            .filter(RosterGeneration.roster_id == roster.roster_id)
+            .scalar()
+        )
+
+        generation_number = (latest_generation or 0) + 1
+        completed_at = datetime.now(timezone.utc)
+
+        generation = RosterGeneration(
+            roster_id=roster.roster_id,
+            generation_number=generation_number,
+            solver_status=GenerationStatus(result.status.lower()),
+            solver_time_limit_seconds=time_limit_seconds,
+            solver_parameters={
+                "time_limit_seconds": time_limit_seconds,
+                "coverage_relaxation": True,
+            },
+            objective_value=result.objective_value,
+            started_at=completed_at - timedelta(
+                seconds=result.solver_time_seconds
+            ),
+            completed_at=completed_at,
+        )
+
+        db.add(generation)
+        db.flush()
+
+        # Create one employee-day record for each scheduled employee/date.
+        employee_dates = {
+            (a["employee_id"], a["work_date"])
+            for a in result.assignments
+        }
+
+        employee_day_map = {}
+
+        for employee_id, work_date in employee_dates:
+            employee_day = RosterEmployeeDay(
+                generation_id=generation.generation_id,
+                employee_id=employee_id,
+                roster_date=work_date,
+                status=DayStatus.WORKING,
+            )
+
+            db.add(employee_day)
+            db.flush()
+
+            employee_day_map[(employee_id, work_date)] = (
+                employee_day.employee_day_id
+            )
+
+        # Save assignments.
+        for assignment in result.assignments:
+            employee_day_id = employee_day_map[
+                (assignment["employee_id"], assignment["work_date"])
+            ]
+
+            db.add(
+                RosterAssignment(
+                    generation_id=generation.generation_id,
+                    employee_day_id=employee_day_id,
+                    employee_id=assignment["employee_id"],
+                    process_id=assignment["process_id"],
+                    shift_id=assignment["shift_id"],
+                    starts_at=assignment["starts_at"].replace(
+                        tzinfo=timezone.utc
+                    ),
+                    ends_at=assignment["ends_at"].replace(
+                        tzinfo=timezone.utc
+                    ),
+                    allocation_minutes=assignment["allocation_minutes"],
+                )
+            )
+
+        # Save unmet staffing coverage as conflicts.
+        for gap in result.unmet_coverage:
+            db.add(
+                RosterConflict(
+                    generation_id=generation.generation_id,
+                    conflict_type=ConflictType.COVERAGE_GAP,
+                    status=ConflictStatus.OPEN,
+                    process_id=gap["process_id"],
+                    conflict_date=gap["work_date"],
+                    description="Staffing coverage requirement not met",
+                    details={
+                        "required_employees": gap["required_employees"],
+                        "unfilled_employees": gap["unfilled_employees"],
+                        "starts_at": gap["starts_at"].isoformat(),
+                        "ends_at": gap["ends_at"].isoformat(),
+                    },
+                )
+            )
+
+        db.commit()
+        db.refresh(generation)
+
+        return {
+            "message": "Roster generation saved successfully",
+            "roster_id": str(roster.roster_id),
+            "generation_id": str(generation.generation_id),
+            "generation_number": generation.generation_number,
+            "solver_status": generation.solver_status.value,
+            "total_assignments": len(result.assignments),
+            "total_conflicts": len(result.unmet_coverage),
+        }
+
+    except Exception:
+        db.rollback()
+        raise
+    
+    
+def generate_and_persist_roster(
+    db: Session,
+    roster: Roster,
+    time_limit_seconds: int = 30,
+):
+    if roster.status != RosterStatus.DRAFT:
+        raise HTTPException(
+            status_code=400,
+            detail="Only draft rosters can be generated",
+        )
+
+    if roster.period_status != RosterPeriodStatus.ACTIVE:
+        raise HTTPException(
+            status_code=400,
+            detail="Archived roster periods cannot be generated",
+        )
+
+    try:
+        employees, options = build_candidate_options(db, roster)
+
+        employee_limits = build_employee_limits(
+            db, employees, roster
+        )
+
+        staffing_slots = build_staffing_slots(db, roster)
+
+        unavailable_periods = build_unavailable_periods(
+            db, employees, roster
+        )
+
+        result = solve_roster(
+            options=options,
+            staffing_slots=staffing_slots,
+            employee_limits=employee_limits,
+            unavailable_periods=unavailable_periods,
+            time_limit_seconds=time_limit_seconds,
+            relax_coverage=True,
+        )
+
+        return persist_roster_generation(
+            db=db,
+            roster=roster,
+            result=result,
+            time_limit_seconds=time_limit_seconds,
+        )
+
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
