@@ -9,7 +9,9 @@ from app.core.permissions import require_operations_manager
 
 from app.schemas.roster_schema import (
     RosterCreate,
-    RosterResponse
+    RosterResponse,
+    RosterGenerationRequest,
+    RosterGenerationResult
 )
 
 from app.models.roster import Roster
@@ -19,6 +21,9 @@ from app.models.enums import (
 )
 
 from app.services import roster_service as service
+from app.models.roster import Roster
+from app.services.roster_generation_service import generate_roster_preview
+from app.services import roster_generation_service
 
 
 router = APIRouter(
@@ -92,7 +97,23 @@ def get_roster(
 
     return roster
 
+@router.post(
+    "/{roster_id}/generate-preview",
+    dependencies=[Depends(require_operations_manager)]
+)
+def generate_roster_preview_route(
+    roster_id: UUID,
+    db: Session = Depends(get_db),
+):
+    roster = db.query(Roster).filter(
+        Roster.roster_id == roster_id
+    ).first()
 
+    if not roster:
+        raise HTTPException(status_code=404, detail="Roster not found")
+
+    return generate_roster_preview(db, roster)
+'''
 @router.patch(
     "/{roster_id}/archive",
     response_model=RosterResponse
@@ -117,3 +138,24 @@ def archive_roster(
             status_code=400,
             detail=str(e)
         )
+        '''
+
+@router.post(
+    "/{roster_id}/generate-preview",
+    dependencies=[Depends(require_operations_manager)]
+)
+def generate_roster_preview_route(
+    roster_id: UUID,
+    db: Session = Depends(get_db),
+):
+    roster = db.query(Roster).filter(
+        Roster.roster_id == roster_id
+    ).first()
+
+    if not roster:
+        raise HTTPException(
+            status_code=404,
+            detail="Roster not found"
+        )
+
+    return generate_roster_preview(db, roster)

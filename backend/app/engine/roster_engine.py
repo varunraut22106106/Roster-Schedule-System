@@ -272,8 +272,11 @@ def solve_roster(
                 )
 
     # Coverage constraints.
+        # Coverage constraints.
     shortage_vars = []
     coverage_records = []
+
+    strict_coverage = model.NewBoolVar("strict_coverage")
 
     for slot_index, slot in enumerate(staffing_slots):
         eligible_keys = []
@@ -288,23 +291,12 @@ def solve_roster(
             if slot.shift_id and option.shift_id != slot.shift_id:
                 continue
 
-            if _overlaps(
-                option.starts_at,
-                option.ends_at,
-                slot.starts_at,
-                slot.ends_at,
+            # An assignment must cover the entire staffing slot.
+            if (
+                option.starts_at <= slot.starts_at
+                and option.ends_at >= slot.ends_at
             ):
                 eligible_keys.append(index)
-
-        if not eligible_keys:
-            shortage = model.NewIntVar(
-                slot.minimum_employees,
-                slot.minimum_employees,
-                f"shortage_{slot_index}",
-            )
-            shortage_vars.append(shortage)
-            coverage_records.append((slot, shortage))
-            continue
 
         shortage = model.NewIntVar(
             0,
@@ -317,28 +309,31 @@ def solve_roster(
             >= slot.minimum_employees
         )
 
+        # First attempt: shortage must be zero.
+        model.Add(shortage == 0).OnlyEnforceIf(strict_coverage)
+
         shortage_vars.append(shortage)
         coverage_records.append((slot, shortage))
 
-    # First solve with strict coverage. If infeasible, solve again with
-    # coverage shortages allowed and minimized. No employee hard rule
-    # is relaxed.
+    model.Minimize(sum(shortage_vars))
+
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = time_limit_seconds
     solver.parameters.num_search_workers = 8
 
-    model.Minimize(sum(shortage_vars))
-
+    # First attempt: strict coverage.
+    model.AddAssumption(strict_coverage)
     status = solver.Solve(model)
 
-    if status == cp_model.INFEASIBLE and not relax_coverage:
-        return SolverResult(
-            status="INFEASIBLE",
-            objective_value=None,
-            assignments=[],
-            unmet_coverage=[],
-            solver_time_seconds=solver.WallTime(),
-        )
+    # Retry only when strict coverage is proven infeasible.
+    if status == cp_model.INFEASIBLE and relax_coverage:
+        model.ClearAssumptions()
+
+        solver = cp_model.CpSolver()
+        solver.parameters.max_time_in_seconds = time_limit_seconds
+        solver.parameters.num_search_workers = 8
+
+        status = solver.Solve(model)
 
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         return SolverResult(
@@ -369,6 +364,7 @@ def solve_roster(
 
     for slot, shortage in coverage_records:
         shortage_value = solver.Value(shortage)
+
         if shortage_value > 0:
             unmet_coverage.append({
                 "process_id": slot.process_id,
