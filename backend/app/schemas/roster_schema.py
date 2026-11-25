@@ -23,11 +23,10 @@ class RosterCreate(BaseModel):
     year: int = Field(ge=2000)
     month: int = Field(ge=1, le=12)
 
-
+'''
 class RosterUpdate(BaseModel):
-    status: RosterStatus | None = None
-    period_status: RosterPeriodStatus | None = None
-
+    pass
+'''
 
 class RosterResponse(BaseModel):
     roster_id: UUID
@@ -293,8 +292,8 @@ class StaffingTimeSlotCreate(BaseModel):
     weekday: int | None = Field(default=None, ge=0, le=6)
     effective_date: date | None = None
 
-    start_time: datetime | None = None
-    end_time: datetime | None = None
+    start_time: time | None = None
+    end_time: time | None = None
 
     minimum_employees: int = Field(ge=0)
     is_active: bool = True
@@ -336,8 +335,8 @@ class StaffingTimeSlotUpdate(BaseModel):
     weekday: int | None = Field(default=None, ge=0, le=6)
     effective_date: date | None = None
 
-    start_time: datetime | None = None
-    end_time: datetime | None = None
+    start_time: time | None = None
+    end_time: time | None = None
 
     minimum_employees: int | None = Field(default=None, ge=0)
     is_active: bool | None = None
@@ -350,10 +349,26 @@ class StaffingTimeSlotResponse(BaseModel):
     scope: StaffingRuleScope
     weekday: int | None
     effective_date: date | None
-    start_time: datetime | None
-    end_time: datetime | None
+    start_time: time | None
+    end_time: time | None
     minimum_employees: int
     is_active: bool
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+    
+    
+class RosterGenerationRequest(BaseModel):
+    time_limit_seconds: int = Field(default=60, gt=0, le=600)
+    relax_coverage: bool = True
+
+
+class RosterGenerationResult(BaseModel):
+    generation_id: UUID
+    roster_id: UUID
+    generation_number: int
+    solver_status: GenerationStatus
+    objective_value: float | None
+    assignments_created: int
+    unmet_coverage_count: int
+    solver_time_seconds: float

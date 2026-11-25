@@ -95,6 +95,15 @@ class StaffingRequirement(Base):
     __table_args__ = (
         CheckConstraint("minimum_employees >= 0"),
         CheckConstraint("weekday IS NULL OR weekday BETWEEN 0 AND 6"),
+        CheckConstraint(
+            "(start_time IS NULL AND end_time IS NULL) OR "
+            "(start_time IS NOT NULL AND end_time IS NOT NULL)",
+            name="ck_staffing_time_slot_pair"
+        ),
+        CheckConstraint(
+            "start_time IS NULL OR end_time > start_time",
+            name="ck_staffing_time_slot_order"
+        )
     )
 
     process = relationship("Process")
@@ -188,14 +197,5 @@ class WorkloadPolicy(Base):
         CheckConstraint("max_hours_per_day > 0"),
         CheckConstraint("max_hours_per_week > 0"),
         CheckConstraint("max_consecutive_work_days > 0"),
-        CheckConstraint("minimum_rest_hours >= 0"),
-        CheckConstraint(
-            "(start_time IS NULL AND end_time IS NULL) OR "
-            "(start_time IS NOT NULL AND end_time IS NOT NULL)",
-            name="ck_staffing_time_slot_pair"
-        ),
-        CheckConstraint(
-            "start_time IS NULL OR end_time > start_time",
-            name="ck_staffing_time_slot_order"
-        ),
+        CheckConstraint("minimum_rest_hours >= 0")
     )
