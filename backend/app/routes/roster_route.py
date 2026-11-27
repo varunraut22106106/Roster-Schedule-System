@@ -31,6 +31,12 @@ from app.schemas.roster_schema import (
     RosterConflictResponse,
 )
 from app.core.dependencies import get_current_user
+from datetime import date
+from app.models.enums import DayStatus
+from app.schemas.roster_schema import (
+    RosterEmployeeDayDetailResponse,
+    RosterEditHistoryResponse,
+)
 
 
 
@@ -323,6 +329,47 @@ def get_roster_conflicts(
             db,
             roster_id,
             conflict_status,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    
+@router.get(
+    "/{roster_id}/generations/{generation_id}/employee-days",
+    response_model=list[RosterEmployeeDayDetailResponse],
+)
+def get_generation_employee_days(
+    roster_id: UUID,
+    generation_id: UUID,
+    work_date: date | None = None,
+    employee_id: UUID | None = None,
+    day_status: DayStatus | None = None,
+    db: Session = Depends(get_db),
+):
+    try:
+        return service.get_generation_employee_days(
+            db,
+            roster_id,
+            generation_id,
+            work_date,
+            employee_id,
+            day_status,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get(
+    "/{roster_id}/generations/{generation_id}/edit-history",
+    response_model=list[RosterEditHistoryResponse],
+)
+def get_generation_edit_history(
+    roster_id: UUID,
+    generation_id: UUID,
+    db: Session = Depends(get_db),
+):
+    try:
+        return service.get_generation_edit_history(
+            db, roster_id, generation_id
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))

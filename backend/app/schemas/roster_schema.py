@@ -391,3 +391,15 @@ class PublishRosterRequest(BaseModel):
 class ConflictResolutionRequest(BaseModel):
     status: ConflictStatus
     notes: str | None = None
+    
+class RosterEmployeeDayDetailResponse(BaseModel):
+    employee_day_id: UUID
+    generation_id: UUID
+    employee_id: UUID
+    employee_name: str
+    employee_code: str
+    roster_date: date
+    status: DayStatus
+    notes: str | None
+
+    model_config = ConfigDict(from_attributes=True)

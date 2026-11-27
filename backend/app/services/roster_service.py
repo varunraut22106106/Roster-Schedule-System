@@ -5,16 +5,18 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 from app.models.roster import Roster,RosterGeneration
-from app.models.enums import RosterStatus, RosterPeriodStatus,GenerationStatus,ConflictStatus
+from app.models.enums import RosterStatus, RosterPeriodStatus,GenerationStatus,ConflictStatus,DayStatus
 from app.schemas.roster_schema import RosterGenerationResponse
 from app.models.roster import (
     Roster,
     RosterGeneration,
     RosterAssignment,
     RosterConflict,
-    RosterConflictHistory
+    RosterConflictHistory,
+    RosterEmployeeDay,
+    RosterEditHistory
 )
-from datetime import datetime, timezone
+from datetime import datetime, timezone,date
 from app.models.employee import Employee
 from app.models.organization import Process
 from app.models.policies import Shift
@@ -397,3 +399,79 @@ def get_roster_conflicts(
         RosterConflict.conflict_date,
         RosterConflict.created_at,
     ).all()
+    
+def get_generation_employee_days(
+    db: Session,
+    roster_id: UUID,
+    generation_id: UUID,
+    work_date: date | None = None,
+    employee_id: UUID | None = None,
+    day_status: DayStatus | None = None,
+):
+    _get_generation(db, roster_id, generation_id)
+
+    query = (
+        db.query(
+            RosterEmployeeDay,
+            Employee.full_name.label("employee_name"),
+            Employee.employee_code.label("employee_code"),
+        )
+        .join(
+            Employee,
+            RosterEmployeeDay.employee_id == Employee.employee_id,
+        )
+        .filter(
+            RosterEmployeeDay.generation_id == generation_id
+        )
+    )
+
+    if work_date:
+        query = query.filter(
+            RosterEmployeeDay.roster_date == work_date
+        )
+
+    if employee_id:
+        query = query.filter(
+            RosterEmployeeDay.employee_id == employee_id
+        )
+
+    if day_status:
+        query = query.filter(
+            RosterEmployeeDay.status == day_status
+        )
+
+    rows = query.order_by(
+        RosterEmployeeDay.roster_date,
+        Employee.full_name,
+    ).all()
+
+    return [
+        {
+            "employee_day_id": day.employee_day_id,
+            "generation_id": day.generation_id,
+            "employee_id": day.employee_id,
+            "employee_name": employee_name,
+            "employee_code": employee_code,
+            "roster_date": day.roster_date,
+            "status": day.status,
+            "notes": day.notes,
+        }
+        for day, employee_name, employee_code in rows
+    ]
+
+
+def get_generation_edit_history(
+    db: Session,
+    roster_id: UUID,
+    generation_id: UUID,
+):
+    _get_generation(db, roster_id, generation_id)
+
+    return (
+        db.query(RosterEditHistory)
+        .filter(
+            RosterEditHistory.generation_id == generation_id
+        )
+        .order_by(RosterEditHistory.edited_at.desc())
+        .all()
+    )
