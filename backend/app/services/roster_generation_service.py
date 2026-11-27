@@ -388,9 +388,13 @@ def build_unavailable_periods(db: Session, employees, roster: Roster):
     employee_ids = [employee.employee_id for employee in employees]
 
     if not employee_ids:
-        return []
+        return [],{}
 
     unavailable = []
+    weekly_off_periods, weekly_off_dates = build_weekly_off_periods(
+        db, employees, roster
+    )
+    unavailable.extend(weekly_off_periods)
 
     leaves = db.query(Leave).filter(
         Leave.employee_id.in_(employee_ids),
@@ -472,7 +476,7 @@ def build_unavailable_periods(db: Session, employees, roster: Roster):
             )
         )
 
-    return unavailable
+    return unavailable,weekly_off_dates
 
 def generate_roster_preview(
     db: Session,
@@ -500,7 +504,7 @@ def generate_roster_preview(
 
         staffing_slots = build_staffing_slots(db, roster)
 
-        unavailable_periods = build_unavailable_periods(
+        unavailable_periods, weekly_off_dates = build_unavailable_periods(
             db, employees, roster
         )
 
@@ -536,6 +540,13 @@ def generate_roster_preview(
                 }
                 for a in result.assignments
             ],
+            "weekly_offs": [
+                {
+                    "employee_id": str(employee_id),
+                    "dates": sorted(d.isoformat() for d in off_dates),
+                }
+                for employee_id, off_dates in weekly_off_dates.items()
+            ],
         }
 
     except ValueError as exc:
@@ -551,6 +562,7 @@ def persist_roster_generation(
     roster: Roster,
     result,
     time_limit_seconds: int = 30,
+    weekly_off_dates=None,
 ):
     if roster.status != RosterStatus.DRAFT:
         raise HTTPException(
@@ -599,20 +611,38 @@ def persist_roster_generation(
         db.add(generation)
         db.flush()
 
-        # Create one employee-day record for each scheduled employee/date.
+        # Create employee-day records for scheduled and weekly-off dates.
         employee_dates = {
+            (a["employee_id"], a["work_date"])
+            for a in result.assignments
+        }
+
+        weekly_off_dates = weekly_off_dates or {}
+        for employee_id, off_dates in weekly_off_dates.items():
+            for off_date in off_dates:
+                employee_dates.add((employee_id, off_date))
+
+        working_dates = {
             (a["employee_id"], a["work_date"])
             for a in result.assignments
         }
 
         employee_day_map = {}
 
-        for employee_id, work_date in employee_dates:
+        for employee_id, work_date in sorted(
+            employee_dates, key=lambda item: (str(item[0]), item[1])
+        ):
+            day_status = (
+                DayStatus.WORKING
+                if (employee_id, work_date) in working_dates
+                else DayStatus.WEEKLY_OFF
+            )
+
             employee_day = RosterEmployeeDay(
                 generation_id=generation.generation_id,
                 employee_id=employee_id,
                 roster_date=work_date,
-                status=DayStatus.WORKING,
+                status=day_status,
             )
 
             db.add(employee_day)
@@ -708,7 +738,7 @@ def generate_and_persist_roster(
 
         staffing_slots = build_staffing_slots(db, roster)
 
-        unavailable_periods = build_unavailable_periods(
+        unavailable_periods, weekly_off_dates = build_unavailable_periods(
             db, employees, roster
         )
 
@@ -726,7 +756,141 @@ def generate_and_persist_roster(
             roster=roster,
             result=result,
             time_limit_seconds=time_limit_seconds,
+            weekly_off_dates=weekly_off_dates,
         )
 
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+    
+    
+def build_weekly_off_periods(db: Session, employees, roster: Roster):
+    """
+    Automatically distribute weekly offs across employees.
+    Returns:
+        unavailable_periods: solver constraints
+        weekly_off_dates: {employee_id: set[date]}
+    """
+    dates = get_roster_dates(roster.year, roster.month)
+    month_start, month_end = dates[0], dates[-1]
+
+    policies = db.query(WeeklyOffPolicy).filter(
+        WeeklyOffPolicy.is_active.is_(True),
+        WeeklyOffPolicy.effective_from <= month_end,
+        (
+            WeeklyOffPolicy.effective_until.is_(None)
+            | (WeeklyOffPolicy.effective_until >= month_start)
+        ),
+    ).all()
+
+    employees_by_pod = {}
+    for employee in employees:
+        employees_by_pod.setdefault(employee.pod_id, []).append(employee)
+
+    weekly_off_dates = {
+        employee.employee_id: set() for employee in employees
+    }
+
+    # Process complete Monday-Sunday weeks intersecting the roster month.
+    first_monday = month_start - timedelta(days=month_start.weekday())
+    current_monday = first_monday
+
+    while current_monday <= month_end:
+        week_sunday = current_monday + timedelta(days=6)
+
+        for pod_id, pod_employees in employees_by_pod.items():
+            # Prefer a pod-specific policy; otherwise use the organization policy.
+            applicable = [
+                p for p in policies
+                if p.pod_id == pod_id
+                and p.effective_from <= week_sunday
+                and (
+                    p.effective_until is None
+                    or p.effective_until >= current_monday
+                )
+            ]
+
+            if not applicable:
+                applicable = [
+                    p for p in policies
+                    if p.pod_id is None
+                    and p.effective_from <= week_sunday
+                    and (
+                        p.effective_until is None
+                        or p.effective_until >= current_monday
+                    )
+                ]
+
+            if not applicable:
+                continue
+
+            policy = max(applicable, key=lambda p: p.effective_from)
+            off_count = policy.off_days_per_week
+
+            if off_count == 0:
+                continue
+
+            if off_count == 7:
+                base_weekdays = list(range(7))
+            else:
+                # Spread the off days across the week.
+                base_weekdays = [
+                    (i * 7) // off_count for i in range(off_count)
+                ]
+
+            pod_employees = sorted(
+                pod_employees,
+                key=lambda e: e.employee_code
+            )
+
+            # Rotation repeats after rotation_cycle_weeks.
+            anchor_monday = (
+                policy.effective_from
+                - timedelta(days=policy.effective_from.weekday())
+            )
+            week_index = max(
+                0, (current_monday - anchor_monday).days // 7
+            )
+            rotation_phase = week_index % policy.rotation_cycle_weeks
+
+            for employee_index, employee in enumerate(pod_employees):
+                offset = (
+                    employee_index + rotation_phase
+                ) % 7
+
+                for weekday in base_weekdays:
+                    rotated_weekday = (weekday + offset) % 7
+                    off_date = current_monday + timedelta(
+                        days=rotated_weekday
+                    )
+
+                    if not (month_start <= off_date <= month_end):
+                        continue
+
+                    if off_date < policy.effective_from:
+                        continue
+
+                    if (
+                        policy.effective_until is not None
+                        and off_date > policy.effective_until
+                    ):
+                        continue
+
+                    weekly_off_dates[employee.employee_id].add(off_date)
+
+        current_monday += timedelta(days=7)
+
+    unavailable_periods = []
+
+    for employee_id, off_dates in weekly_off_dates.items():
+        for off_date in off_dates:
+            starts_at = datetime.combine(off_date, time.min)
+
+            unavailable_periods.append(
+                UnavailablePeriod(
+                    employee_id=employee_id,
+                    starts_at=starts_at,
+                    ends_at=starts_at + timedelta(days=1),
+                )
+            )
+
+    return unavailable_periods, weekly_off_dates
