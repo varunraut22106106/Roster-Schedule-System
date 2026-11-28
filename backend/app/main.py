@@ -26,6 +26,7 @@ from app.routes.availability_route import router as availability_router
 from app.routes.leave_compoff_route import router as leave_compoff_router
 from app.routes.roster_allocation_route import router as roster_allocation_router
 from app.routes.roster_route import router as roster_router
+from app.routes.roster_view_route import router as roster_view_router
 
 
 app.include_router(auth_router)
@@ -36,3 +37,4 @@ app.include_router(availability_router)
 app.include_router(leave_compoff_router)
 app.include_router(roster_allocation_router)
 app.include_router(roster_router)
+app.include_router(roster_view_router)
