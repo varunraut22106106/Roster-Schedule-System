@@ -561,8 +561,9 @@ def persist_roster_generation(
     db: Session,
     roster: Roster,
     result,
+    employees,
+    weekly_off_dates,
     time_limit_seconds: int = 30,
-    weekly_off_dates=None,
 ):
     if roster.status != RosterStatus.DRAFT:
         raise HTTPException(
@@ -612,37 +613,45 @@ def persist_roster_generation(
         db.flush()
 
         # Create employee-day records for scheduled and weekly-off dates.
-        employee_dates = {
-            (a["employee_id"], a["work_date"])
-            for a in result.assignments
-        }
-
-        weekly_off_dates = weekly_off_dates or {}
-        for employee_id, off_dates in weekly_off_dates.items():
-            for off_date in off_dates:
-                employee_dates.add((employee_id, off_date))
-
+        # Create employee-day records for working days and weekly offs.
         working_dates = {
             (a["employee_id"], a["work_date"])
             for a in result.assignments
         }
 
+        weekly_off_records = {
+            (employee_id, off_date)
+            for employee_id, off_dates in weekly_off_dates.items()
+            for off_date in off_dates
+        }
+
+        # An employee cannot be both working and on weekly off.
+        overlapping_dates = working_dates.intersection(weekly_off_records)
+
+        if overlapping_dates:
+            raise ValueError(
+                f"Solver assigned employees on weekly-off dates: {overlapping_dates}"
+            )
+
+        employee_dates = working_dates.union(weekly_off_records)
+
         employee_day_map = {}
 
         for employee_id, work_date in sorted(
-            employee_dates, key=lambda item: (str(item[0]), item[1])
+            employee_dates,
+            key=lambda item: (str(item[0]), item[1])
         ):
-            day_status = (
-                DayStatus.WORKING
-                if (employee_id, work_date) in working_dates
-                else DayStatus.WEEKLY_OFF
+            status = (
+                DayStatus.WEEKLY_OFF
+                if (employee_id, work_date) in weekly_off_records
+                else DayStatus.WORKING
             )
 
             employee_day = RosterEmployeeDay(
                 generation_id=generation.generation_id,
                 employee_id=employee_id,
                 roster_date=work_date,
-                status=day_status,
+                status=status,
             )
 
             db.add(employee_day)
@@ -755,8 +764,9 @@ def generate_and_persist_roster(
             db=db,
             roster=roster,
             result=result,
-            time_limit_seconds=time_limit_seconds,
+            employees=employees,
             weekly_off_dates=weekly_off_dates,
+            time_limit_seconds=time_limit_seconds,
         )
 
     except ValueError as exc:
